@@ -1,0 +1,81 @@
+:root {
+  --bg: #0e1116;
+  --card: #171c24;
+  --ink: #e8edf4;
+  --muted: #8b97a8;
+  --line: #2a3340;
+  --acc: #6ee7b7;
+  --acc2: #7dd3fc;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.4 "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 20px 18px 8px;
+}
+h1 { margin: 0; font-size: 28px; letter-spacing: -0.03em; }
+.tag { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.presets, .actions, .master, .sinks, .found { padding: 8px 18px; }
+.presets, .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+button {
+  background: var(--acc);
+  color: #042014;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+button.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+button.active { outline: 2px solid var(--acc2); }
+.master { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }
+input[type=range] { width: 100%; }
+.sinks { display: grid; gap: 10px; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+}
+.card h2 { margin: 0 0 4px; font-size: 16px; }
+.meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+select, .card input[type=number] {
+  background: #0e1116;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.dot.on { background: var(--acc); }
+.dot.off { background: #ef4444; }
+#log {
+  margin: 12px 18px 32px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+}
+.found .item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
