@@ -1,0 +1,13 @@
+[Unit]
+Description=btasio Bluetooth multi-sink hub
+After=pipewire.service bluetooth.service network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/btasio-hub
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

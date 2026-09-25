@@ -1,0 +1,28 @@
+[project]
+name = "btasio-hub"
+version = "0.1.0"
+description = "Bluetooth multi-sink audio hub: stereo, mid-side, all"
+readme = "../README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "zeroconf>=0.136.0",
+  "pydantic>=2.9.0",
+]
+
+[project.optional-dependencies]
+linux = [
+  "dbus-next>=0.2.3",
+]
+
+[project.scripts]
+btasio-hub = "btasio_hub.main:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["btasio_hub*"]
