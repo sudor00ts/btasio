@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from .bluez import BlueZ
 from .matrix import apply_preset
 from .models import (
+    Adapter,
     AssignBody,
     CustomMatrixBody,
     DelayBody,
@@ -18,18 +20,34 @@ from .models import (
 from .pw import PipeWireGraph
 
 log = logging.getLogger("btasio.engine")
-STATE_PATH = Path.home() / ".config" / "btasio" / "state.json"
+
+_DEMO = bool(os.environ.get("VERCEL") or os.environ.get("BTASIO_DEMO"))
+_state_dir = Path("/tmp/btasio") if _DEMO else Path.home() / ".config" / "btasio"
+STATE_PATH = _state_dir / "state.json"
+
+DEMO_SINKS = [
+    Sink(mac="AA:BB:CC:00:00:01", name="Parlante L (demo)", adapter="hci0",
+         connected=True, a2dp=True, codec="SBC", role=Role.L, delay_ms=160),
+    Sink(mac="AA:BB:CC:00:00:02", name="Parlante R (demo)", adapter="hci1",
+         connected=True, a2dp=True, codec="SBC", role=Role.R, delay_ms=155),
+    Sink(mac="AA:BB:CC:00:00:03", name="Sub / extra (demo)", adapter="hci2",
+         connected=True, a2dp=True, codec="SBC", role=Role.SUB, delay_ms=170),
+]
 
 
 class Engine:
     def __init__(self) -> None:
         self.bluez = BlueZ()
         self.pw = PipeWireGraph()
+        demo = _DEMO or not (self.bluez.available and self.pw.available)
         self.state = HubState(
-            dry_run=not (self.bluez.available and self.pw.available),
-            message="dry-run" if not self.pw.available else "ok",
+            dry_run=demo,
+            message="demo Vercel — sin Bluetooth, solo UI" if _DEMO else ("dry-run" if demo else "ok"),
         )
         self._load()
+        if demo and not self._saved_sinks:
+            self._saved_sinks = {s.mac.upper(): s for s in DEMO_SINKS}
+            self.state.sinks = list(DEMO_SINKS)
         self.refresh()
 
     def _load(self) -> None:
@@ -46,15 +64,25 @@ class Engine:
             self._saved_sinks = {}
 
     def _save(self) -> None:
-        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        STATE_PATH.write_text(self.state.model_dump_json(indent=2))
+        try:
+            STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            STATE_PATH.write_text(self.state.model_dump_json(indent=2))
+        except OSError as exc:
+            log.warning("state save skipped: %s", exc)
 
     def refresh(self) -> HubState:
         adapters = self.bluez.adapters()
         discovered = self.bluez.paired_sinks()
         saved = getattr(self, "_saved_sinks", {})
+        if self.state.dry_run and not discovered:
+            discovered = list(saved.values()) or list(DEMO_SINKS)
+            if not adapters:
+                adapters = [
+                    Adapter(hci="hci0", address="00:11:22:33:44:50", alias="demo0"),
+                    Adapter(hci="hci1", address="00:11:22:33:44:51", alias="demo1"),
+                    Adapter(hci="hci2", address="00:11:22:33:44:52", alias="demo2"),
+                ]
         pw_nodes = {n.get("mac"): n for n in self.pw.list_sink_nodes() if n.get("mac")}
-
         merged: dict[str, Sink] = {}
         for s in discovered:
             prev = saved.get(s.mac.upper())
@@ -69,13 +97,11 @@ class Engine:
                 s.pw_node = node["name"]
                 s.a2dp = True
             merged[s.mac.upper()] = s
-
         for mac, prev in saved.items():
             if mac not in merged:
                 prev.connected = False
                 prev.a2dp = False
                 merged[mac] = prev
-
         self.state.adapters = adapters
         self.state.sinks = list(merged.values())
         apply_preset(self.state.sinks, self.state.preset)
@@ -102,7 +128,6 @@ class Engine:
         for s in self.state.sinks:
             if s.mac.upper() == body.mac.upper():
                 s.role = body.role
-        self.state.preset = Preset.CUSTOM if body.role == Role.UNASSIGNED else self.state.preset
         return self.apply_graph()
 
     def set_delay(self, body: DelayBody) -> HubState:
