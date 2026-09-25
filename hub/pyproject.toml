@@ -8,13 +8,7 @@ license = { text = "GPL-3.0-or-later" }
 dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.32.0",
-  "zeroconf>=0.136.0",
   "pydantic>=2.9.0",
-]
-
-[project.optional-dependencies]
-linux = [
-  "dbus-next>=0.2.3",
 ]
 
 [project.scripts]
@@ -26,3 +20,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["btasio_hub*"]
+
+[tool.vercel]
+entrypoint = "btasio_hub.main:app"
