@@ -1,0 +1,24 @@
+name: android-apk
+on:
+  workflow_dispatch:
+  push:
+    paths: ["app/**", ".github/workflows/android-apk.yml"]
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: materialize android platform
+        working-directory: app
+        run: |
+          flutter create . --org ar.tullio --project-name btasio --platforms=android
+          flutter pub get
+          flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: btasio-debug-apk
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
