@@ -20,15 +20,21 @@ jobs:
         working-directory: app
         run: |
           flutter create . --org ar.tullio --project-name btasio --platforms=android
-          echo "--- build.gradle.kts before ---"
-          cat android/app/build.gradle.kts || true
-          # Force compileSdk 36 (plugins require it)
+          # App-level
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts || true
-          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle || true
-          # Fallback: any compileSdk line
-          sed -i 's/compileSdk = .*/compileSdk = 36/' android/app/build.gradle.kts || true
-          echo "--- build.gradle.kts after ---"
-          cat android/app/build.gradle.kts || true
+          # Force all plugins (file_picker etc.) to compileSdk 36
+          cat >> android/build.gradle.kts << 'EOF'
+
+          subprojects {
+              afterEvaluate {
+                  extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
+                      compileSdkVersion(36)
+                  }
+              }
+          }
+          EOF
+          echo "--- root build.gradle.kts ---"
+          cat android/build.gradle.kts || true
           flutter pub get
           flutter build apk --debug
       - uses: actions/upload-artifact@v4
