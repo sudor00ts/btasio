@@ -1,36 +1,32 @@
 #!/usr/bin/env python3
 """Receiver web para iPhone/Safari.
 
-La Mac escucha el mismo UDP :8746 que usa lan_host.py y lo reenvía
-por Server-Sent Events a cualquier navegador. Safari en el iPhone
-reproduce el PCM y el sistema lo manda al parlante Bluetooth emparejado.
+La Mac escucha UDP :8746 y el navegador hace polling corto a /poll.
+Más compatible con Safari que Server-Sent Events.
 
 Uso:
   python3 tools/web_rx_server.py
-  # en el iPhone: http://IP_DE_LA_MAC:8080
-  # en otra terminal:
-  python3 tools/lan_host.py --to IP_SAMSUNG:L --to 127.0.0.1:R
+  # iPhone: http://IP_DE_LA_MAC:8080
+  # otra terminal:
+  python3 tools/lan_host.py --to 127.0.0.1:R
 """
 
 from __future__ import annotations
 
 import json
-import queue
 import socket
 import struct
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 MAGIC = 0x42544153
-HEADER = struct.Struct("<I B B H I q i I H H I")  # 36 bytes
+HEADER = struct.Struct("<I B B H I q i I H H I")
 UDP_PORT = 8746
 HTTP_PORT = 8080
 
-# clients: list of queues
-clients: list[queue.Queue] = []
-clients_lock = threading.Lock()
+frames: dict[int, list[dict]] = {}
+frames_lock = threading.Lock()
+MAX_KEEP = 40
 
 
 def udp_loop() -> None:
@@ -49,21 +45,12 @@ def udp_loop() -> None:
         if magic != MAGIC or nbytes != len(data) - 36:
             continue
         pcm = data[36:]
-        msg = json.dumps({
-            "ch": ch,
-            "seq": seq,
-            "sr": sr,
-            "pcm": pcm.hex(),
-        })
-        with clients_lock:
-            dead = []
-            for q in clients:
-                try:
-                    q.put_nowait(msg)
-                except queue.Full:
-                    dead.append(q)
-            for q in dead:
-                clients.remove(q)
+        item = {"ch": ch, "seq": seq, "sr": sr, "pcm": pcm.hex()}
+        with frames_lock:
+            lst = frames.setdefault(ch, [])
+            lst.append(item)
+            if len(lst) > MAX_KEEP:
+                del lst[: len(lst) - MAX_KEEP]
 
 
 HTML = r"""<!DOCTYPE html>
@@ -103,11 +90,11 @@ HTML = r"""<!DOCTYPE html>
 const roleSel = document.getElementById('role');
 const btn = document.getElementById('btn');
 const statusEl = document.getElementById('status');
-let es = null;
 let ctx = null;
 let nextTime = 0;
 let running = false;
 let packets = 0;
+let lastSeq = -1;
 
 function setStatus(s) { statusEl.textContent = s; }
 
@@ -126,16 +113,38 @@ function playPcm(hex, sr) {
   src.buffer = buf;
   src.connect(ctx.destination);
   const now = ctx.currentTime;
-  if (nextTime < now) nextTime = now + 0.05;
+  if (nextTime < now) nextTime = now + 0.04;
   src.start(nextTime);
   nextTime += buf.duration;
+}
+
+async function poll() {
+  if (!running) return;
+  const ch = roleSel.value;
+  try {
+    const r = await fetch('/poll?ch=' + ch + '&after=' + lastSeq);
+    if (!r.ok) throw new Error('http ' + r.status);
+    const arr = await r.json();
+    for (const msg of arr) {
+      if (msg.seq <= lastSeq) continue;
+      lastSeq = msg.seq;
+      packets++;
+      playPcm(msg.pcm, msg.sr);
+    }
+    if (packets > 0 && packets % 10 === 0) {
+      setStatus('rx seq=' + lastSeq + ' pkts=' + packets);
+    } else if (packets === 0) {
+      setStatus('conectado, esperando paquetes…');
+    }
+  } catch (e) {
+    setStatus('error: ' + e);
+  }
+  if (running) setTimeout(poll, 40);
 }
 
 btn.onclick = async () => {
   if (running) {
     running = false;
-    if (es) es.close();
-    es = null;
     if (ctx) ctx.close();
     ctx = null;
     btn.textContent = 'Escuchar';
@@ -146,19 +155,11 @@ btn.onclick = async () => {
   await ctx.resume();
   nextTime = 0;
   packets = 0;
+  lastSeq = -1;
   running = true;
   btn.textContent = 'Dejar de escuchar';
   setStatus('conectando…');
-  es = new EventSource('/stream');
-  es.onmessage = (ev) => {
-    if (!running) return;
-    const msg = JSON.parse(ev.data);
-    if (msg.ch !== parseInt(roleSel.value, 10)) return;
-    packets++;
-    if (packets % 25 === 0) setStatus(`rx seq=${msg.seq} ch=${msg.ch} pkts=${packets}`);
-    playPcm(msg.pcm, msg.sr);
-  };
-  es.onerror = () => setStatus('error de conexión');
+  poll();
 };
 </script>
 </body>
@@ -168,10 +169,11 @@ btn.onclick = async () => {
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        return
+        print(f"[http] {self.address_string()} {fmt % args}", flush=True)
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        path = self.path.split("?")[0]
+        if path in ("/", "/index.html"):
             body = HTML.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -179,30 +181,24 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if self.path == "/stream":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-            q: queue.Queue = queue.Queue(maxsize=64)
-            with clients_lock:
-                clients.append(q)
+        if path == "/poll":
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
             try:
-                while True:
-                    try:
-                        msg = q.get(timeout=15)
-                        self.wfile.write(f"data: {msg}\n\n".encode())
-                        self.wfile.flush()
-                    except queue.Empty:
-                        self.wfile.write(b":: ping\n\n")
-                        self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                with clients_lock:
-                    if q in clients:
-                        clients.remove(q)
+                ch = int(qs.get("ch", ["0"])[0])
+                after = int(qs.get("after", ["-1"])[0])
+            except ValueError:
+                ch, after = 0, -1
+            with frames_lock:
+                lst = frames.get(ch, [])
+                out = [x for x in lst if x["seq"] > after]
+            body = json.dumps(out).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
         self.send_response(404)
         self.end_headers()
