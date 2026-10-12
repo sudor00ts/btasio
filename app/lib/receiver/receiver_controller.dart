@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+
 import '../audio/pcm_out.dart';
 import '../models.dart';
 import '../net/media_socket.dart';
@@ -7,17 +9,28 @@ import '../protocol/packet.dart';
 
 class ReceiverController extends ChangeNotifier {
   ReceiverController();
+
   final _net = MediaSocket();
   final _out = PcmOut();
+
   Role role = Role.L;
   int delayMs = 160;
   bool running = false;
   String status = 'idle';
   int packets = 0;
+  int lastSeq = -1;
+
   StreamSubscription? _sub;
 
-  void setRole(Role r) { role = r; notifyListeners(); }
-  void setDelay(int ms) { delayMs = ms.clamp(0, 500); notifyListeners(); }
+  void setRole(Role r) {
+    role = r;
+    notifyListeners();
+  }
+
+  void setDelay(int ms) {
+    delayMs = ms.clamp(0, 500);
+    notifyListeners();
+  }
 
   Future<void> start() async {
     if (running) return;
@@ -25,7 +38,7 @@ class ReceiverController extends ChangeNotifier {
       await _net.bind(port: kMediaPort);
       await _out.start();
     } catch (e) {
-      status = 'bind/audio: $e';
+      status = 'no pude abrir :$kMediaPort / audio: $e';
       notifyListeners();
       return;
     }
@@ -33,14 +46,31 @@ class ReceiverController extends ChangeNotifier {
     packets = 0;
     status = 'escuchando UDP $kMediaPort rol ${role.name}';
     notifyListeners();
-    _sub = _net.packets.listen(_onPkt);
+    _sub = _net.packets.listen(_onPkt, onError: (e) {
+      status = 'rx $e';
+      notifyListeners();
+    });
+  }
+
+  Future<void> testTone() async {
+    try {
+      status = 'reproduciendo tono de prueba…';
+      notifyListeners();
+      await _out.playTestTone();
+      status = 'tono de prueba enviado';
+    } catch (e) {
+      status = 'error tono: $e';
+    }
+    notifyListeners();
   }
 
   void _onPkt(MediaPacket pkt) {
-    if (!running || pkt.channel != role.channel) return;
+    if (!running) return;
+    if (pkt.channel != role.channel) return;
     packets++;
+    lastSeq = pkt.seq;
     if (packets % 25 == 0) {
-      status = 'rx seq=${pkt.seq} ch=${pkt.channel.name}';
+      status = 'rx seq=${pkt.seq} ch=${pkt.channel.name} ${pkt.pcm.length} smp';
       notifyListeners();
     }
     _out.feed(pkt.pcm);
@@ -57,5 +87,8 @@ class ReceiverController extends ChangeNotifier {
   }
 
   @override
-  void dispose() { stop(); super.dispose(); }
+  void dispose() {
+    stop();
+    super.dispose();
+  }
 }
