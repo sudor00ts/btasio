@@ -1,8 +1,12 @@
 name: android-apk
+
 on:
   workflow_dispatch:
   push:
-    paths: ["app/**", ".github/workflows/android-apk.yml"]
+    paths:
+      - "app/**"
+      - ".github/workflows/android-apk.yml"
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -16,6 +20,9 @@ jobs:
         working-directory: app
         run: |
           flutter create . --org ar.tullio --project-name btasio --platforms=android
+          # Bump compileSdk so plugins that require API 36 can build
+          sed -i 's/compileSdk = .*/compileSdk = 36/' android/app/build.gradle.kts || true
+          sed -i 's/compileSdkVersion .*/compileSdkVersion 36/' android/app/build.gradle || true
           flutter pub get
           flutter build apk --debug
       - uses: actions/upload-artifact@v4
