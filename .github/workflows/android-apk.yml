@@ -21,23 +21,15 @@ jobs:
         run: |
           flutter create . --org ar.tullio --project-name btasio --platforms=android
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts || true
-          # Force all plugins to compileSdk 36 using AGP 9 DSL
-          cat >> android/build.gradle.kts << 'EOF'
-
-          subprojects {
-              plugins.withId("com.android.library") {
-                  extensions.configure<com.android.build.api.dsl.LibraryExtension> {
-                      compileSdk = 36
-                  }
-              }
-              plugins.withId("com.android.application") {
-                  extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
-                      compileSdk = 36
-                  }
-              }
-          }
-          EOF
           flutter pub get
+          # Patch every plugin that hardcodes an old compileSdk
+          find "$HOME/.pub-cache" -path '*/android/build.gradle*' -print0 | while IFS= read -r -d '' f; do
+            if grep -qE 'compileSdk(Version)?[[:space:]=]+[0-9]+' "$f"; then
+              echo "patching $f"
+              sed -i -E 's/compileSdkVersion[[:space:]]+[0-9]+/compileSdkVersion 36/' "$f" || true
+              sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/' "$f" || true
+            fi
+          done
           flutter build apk --debug
       - uses: actions/upload-artifact@v4
         with:
