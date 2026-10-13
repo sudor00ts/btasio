@@ -16,19 +16,20 @@ class PcmOut {
       channelCount: 1,
       iosAudioCategory: IosAudioCategory.playback,
     );
-    await FlutterPcmSound.setFeedThreshold(kFrameSamples);
+    await FlutterPcmSound.setFeedThreshold(kFrameSamples * 2);
     FlutterPcmSound.setFeedCallback(_onFeed);
     await FlutterPcmSound.start();
     _ready = true;
-    // Pre-feed so AudioTrack starts and keeps requesting
-    _q.addAll(List.filled(kFrameSamples * 4, 0));
-    await _push(kFrameSamples * 2);
+    // Pre-feed ~200 ms so AudioTrack starts with margin
+    _q.addAll(List.filled(kFrameSamples * 10, 0));
+    await _push(kFrameSamples * 6);
   }
 
   void feed(Int16List mono) {
     if (!_ready) return;
     _q.addAll(mono);
-    final cap = kSampleRate ~/ 2;
+    // keep ~1 s max
+    final cap = kSampleRate;
     while (_q.length > cap) {
       _q.removeFirst();
     }
@@ -48,7 +49,7 @@ class PcmOut {
 
   Future<void> _onFeed(int remaining) async {
     if (!_ready) return;
-    final need = (kFrameSamples * 4 - remaining).clamp(kFrameSamples, kFrameSamples * 6);
+    final need = (kFrameSamples * 8 - remaining).clamp(kFrameSamples, kFrameSamples * 10);
     await _push(need);
   }
 
