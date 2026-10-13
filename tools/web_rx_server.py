@@ -28,7 +28,7 @@ HTTP_PORT = 8080
 # shared latest frames per channel (keep last ~50)
 frames: dict[int, list[dict]] = {}
 frames_lock = threading.Lock()
-MAX_KEEP = 40
+MAX_KEEP = 120
 
 
 def udp_loop() -> None:
@@ -116,7 +116,7 @@ function playPcm(hex, sr) {
   src.buffer = buf;
   src.connect(ctx.destination);
   const now = ctx.currentTime;
-  if (nextTime < now) nextTime = now + 0.04;
+  if (nextTime < now + 0.08) nextTime = now + 0.12;
   src.start(nextTime);
   nextTime += buf.duration;
 }
@@ -128,14 +128,25 @@ async function poll() {
     const r = await fetch('/poll?ch=' + ch + '&after=' + lastSeq);
     if (!r.ok) throw new Error('http ' + r.status);
     const arr = await r.json();
+    let sawOther = -1;
     for (const msg of arr) {
       if (msg.seq <= lastSeq) continue;
       lastSeq = msg.seq;
       packets++;
       playPcm(msg.pcm, msg.sr);
     }
+    // also peek other channels so we can warn about role mismatch
+    if (packets === 0) {
+      try {
+        const all = await fetch('/poll?ch=-1&after=-1');
+        const any = await all.json();
+        if (any.length) sawOther = any[0].ch;
+      } catch (_) {}
+    }
     if (packets > 0 && packets % 10 === 0) {
       setStatus('rx seq=' + lastSeq + ' pkts=' + packets);
+    } else if (packets === 0 && sawOther >= 0) {
+      setStatus('llega canal ' + sawOther + ' pero este rol es ' + ch + ' — cambialo');
     } else if (packets === 0) {
       setStatus('conectado, esperando paquetes…');
     }
@@ -213,8 +224,15 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 ch, after = 0, -1
             with frames_lock:
-                lst = frames.get(ch, [])
-                out = [x for x in lst if x["seq"] > after]
+                if ch < 0:
+                    out = []
+                    for lst in frames.values():
+                        out.extend(x for x in lst if x["seq"] > after)
+                    out.sort(key=lambda x: x["seq"])
+                    out = out[-20:]
+                else:
+                    lst = frames.get(ch, [])
+                    out = [x for x in lst if x["seq"] > after]
             body = json.dumps(out).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
