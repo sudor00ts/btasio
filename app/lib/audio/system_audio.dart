@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:playback_capture/playback_capture.dart';
 
 /// Captura el audio del sistema (YouTube Music, Tidal, etc.) en Android 10+.
-/// Entrega frames de 20 ms a 48 kHz mono (mezcla L+R) listos para el host.
+/// Entrega frames de 20 ms a 48 kHz mono listos para el host.
 class SystemAudioSource {
   final _capture = PlaybackCapture();
   StreamController<Int16List>? _ctrl;
@@ -18,7 +18,8 @@ class SystemAudioSource {
     final result = await _capture.listenAudio(
       audioDataCallback: _onData,
     );
-    if (result != PlaybackCaptureResult.recording) {
+    final name = result.toString();
+    if (!name.contains('recording')) {
       await _ctrl?.close();
       _ctrl = null;
       return false;
@@ -40,7 +41,6 @@ class SystemAudioSource {
 
   Future<void> stop() async {
     _running = false;
-    await _capture.stop();
     await _ctrl?.close();
     _ctrl = null;
   }
